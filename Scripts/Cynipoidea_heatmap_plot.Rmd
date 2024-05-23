@@ -1,0 +1,136 @@
+---
+title: "Cynipoidea_heatmap"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+
+
+
+# Read the tree 
+library(ape)
+library(phytools)
+library(phylogram)
+library(ade4)
+
+#dsDNA_tree <- newick2phylog("((CcFV1,CcFV2),(PoFV,(EfFV,(LbFV,(LhFV,((((LbEFV,(LcEFV,LhEFV))),(RhEFV,ThEFV)),TrEFV))))));")
+
+dsDNA_tree<-read.tree("/Users/bguinet/Desktop/Cynipoidea_paper/Cynipoidea_phylogeny.nwk")
+
+
+# Read the clusters table  
+
+#Cluster <- read.table("/Users/bguinet/Desktop/Papier_filamenteux/ALL_Predicted_and_known_ORFs_cluster.tab",sep=";",h=T)
+Cluster <- read.table("/Users/bguinet/Desktop/Cynipoidea_paper/Cynipoidea_heatmap_table.csv",sep=";",h=T,skip=1)
+
+head(Cluster)
+names(Cluster) <- gsub(x = names(Cluster), pattern = "\\.", replacement = "-")  
+# Manually add sequences 
+library(tidyverse)
+
+Cluster$`X-1`<-NULL
+List_names<-Cluster$X
+Cluster$X<-NULL
+Cluster<-as.matrix(Cluster)
+
+rownames(Cluster)<-List_names
+
+a=read.dendrogram(file = "/Users/bguinet/Desktop/Cynipoidea_paper/Cynipoidea_phylogeny.nwk")
+a<-as.dendrogram(a)
+clade_order <- order.dendrogram(a)
+
+clade_name <- labels(as.dendrogram(a))
+
+
+clade_position <- data.frame(clade_name, clade_order)
+clade_position <- clade_position[order(clade_position$clade_order),]
+new_order <- match(clade_position$clade_name,row.names(Cluster))
+Cluster <- Cluster[new_order,]
+clade_name <- labels(as.dendrogram(a))
+
+rownames(Cluster) <- clade_name
+
+
+  
+#Save to Pdf
+pdfPath="/Users/bguinet/Desktop/Cynipoidea_paper/"
+cairo_pdf(file.path(pdfPath, "Heatmap_gene_content.pdf"), width = 12, height = 7)
+
+
+
+library(gplots)
+par(mar=c(7,4,4,2)+0.1) 
+heatmap.2(as.matrix(Cluster),# main = 'Heatmap of all Positive control candidats to a viral domestication',
+          #reorderfun=function(d, w) reorder(d, w, agglo.FUN = mean),
+          # order by branch mean so the deepest color is at the top
+          Rowv = a,
+          #Colv =hc, #color the branch labels 
+          notecol="white",
+          notecex=2,
+          Colv=FALSE,  #   "yellow"                  "green" "yellow
+          col = c("white","#69B7CE94","#69B7CE","lightgreen","#F4CE4B94","black", "#69B7CE","#C65840","lightgreen","#F4CE4B"),  # color pattern of the heatmap
+          #colCol = Cluster_names_vector_color,   #The cells color depending on the variable chosen
+          trace="none",              # hide trace
+          density.info="none",       # hide histogram
+          margins = c(10,5),         # margin on top(bottom) and left(right) side.
+          cexRow=0.8, cexCol = 0.8,      # size of row / column labels
+          lhei=c(1, 12),           ## plot layout heights (H) of the rows in the plot.
+          lwid=c(1,4),            ## plot layout width (L) of the rows in the plot.
+          colsep=c(1:10000),       #Where to add column seperation
+          rowsep = c(1:100000),      #here to add row seperation
+          sepwidth=c(0.001,0.001),
+          sepcolor="#D8D8D8",      #The color to separate de cells
+          xlab = "Cluster names",
+          key = F,
+          offsetCol = -0.1,
+          offsetRow = -0.1,
+          srtCol = 45,
+          # ("bottom.margin", "left.margin", "top.margin", "left.margin" )
+)
+
+#15-10
+dev.off()
+
+heatmap.2(as.matrix(Cluster),# main = 'Heatmap of all Positive control candidats to a viral domestication',
+          #reorderfun=function(d, w) reorder(d, w, agglo.FUN = mean),
+          # order by branch mean so the deepest color is at the top
+          Rowv = a,
+          #Colv =hc, #color the branch labels 
+          notecol="white",
+          notecex=2,
+          Colv=FALSE,  #   "yellow"                  "green" "yellow
+          col = c("white","#69B7CE94","#C6584094","lightgreen","#F4CE4B94","black", "#69B7CE","#C65840","lightgreen","#F4CE4B"),         # color pattern of the heatmap
+          #colCol = Cluster_names_vector_color,   #The cells color depending on the variable chosen
+          trace="none",              # hide trace
+          density.info="none",       # hide histogram
+          margins = c(10,5),         # margin on top(bottom) and left(right) side.
+          cexRow=0.8, cexCol = 0.8,      # size of row / column labels
+          lhei=c(1, 12),           ## plot layout heights (H) of the rows in the plot.
+          lwid=c(1,4),            ## plot layout width (L) of the rows in the plot.
+          colsep=c(1:10000),       #Where to add column seperation
+          rowsep = c(1:100000),      #here to add row seperation
+          sepwidth=c(0.001,0.001),
+          sepcolor="#D8D8D8",      #The color to separate de cells
+          xlab = "Cluster names",
+          key = F,
+          offsetCol = -0.1,
+          offsetRow = -0.1,
+          srtCol = 45,
+          # ("bottom.margin", "left.margin", "top.margin", "left.margin" )
+)
+
+
+```
+
+
+

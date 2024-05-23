@@ -1,0 +1,68 @@
+---
+title: "Cynipoidea_heatmap"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(ggplot2)
+library(ggthemes)
+library(ggrepel)
+
+BUSCO_dNdS_tab<-read.table("/Users/bguinet/Desktop/Cynipoid_paper/All_BUSCO_dNdS_estimations.tab",sep=";",h=T)
+
+EVE_dNdS_tab<-read.table("/Users/bguinet/Desktop/Cynipoidea_paper/All_EVE_dNdS_estimations.tab",sep=";",h=T)
+EVE_dNdS_tab<-EVE_dNdS_tab[!EVE_dNdS_tab$Mean_dNdS>1,]
+
+head(EVE_dNdS_tab)
+head(BUSCO_dNdS_tab)
+#Only display non-PoEFV dN/dS 
+EVE_dNdS_tab<-EVE_dNdS_tab[!grepl('PoEFV',EVE_dNdS_tab$Tips4dNdS.array),]
+
+#Save to Pdf
+pdfPath="/Users/bguinet/Desktop/Cynipoidea_paper/"
+cairo_pdf(file.path(pdfPath, "dNdS_density_plot.pdf"), width = 12, height = 7)
+
+ggplot(BUSCO_dNdS_tab, aes(x = Mean_dNdS)) +
+  geom_density(color = "black",
+               fill = 4,
+               alpha = 1)+
+  geom_segment(data = EVE_dNdS_tab, aes(x=Mean_dNdS, xend = Mean_dNdS,
+                                y = 0, yend = 7,
+                                color= "black"), key_glyph = "vpath",color="red") +
+  geom_text_repel(data = EVE_dNdS_tab, aes(x = Mean_dNdS, y = 7,
+                             label = Prot_name), nudge_y = 0.4,angle = 45,size=2,box.padding = 1.5, max.overlaps = Inf) +
+  ylim(0,10)+
+  scale_x_continuous(limits = c(0,1.2),breaks = seq(0,1.2,0.1))+
+  theme_base()+
+  xlab("Mean dN/dS ratio") + ylab("Frequency")
+
+dev.off()
+
+
+ggplot(BUSCO_dNdS_tab, aes(x = Mean_dNdS)) +
+  geom_density(color = "black",
+               fill = 4,
+               alpha = 1)+
+  geom_segment(data = EVE_dNdS_tab, aes(x=Mean_dNdS, xend = Mean_dNdS,
+                                y = 0, yend = 7,
+                                color= "black"), key_glyph = "vpath",color="red") +
+  geom_text_repel(data = EVE_dNdS_tab, aes(x = Mean_dNdS, y = 7,
+                             label = Prot_name), nudge_y = 0.4,angle = 45,size=2,box.padding = 1.5, max.overlaps = Inf) +
+  ylim(0,10)+
+  scale_x_continuous(limits = c(0,1.2),breaks = seq(0,1.2,0.1))+
+  theme_base()+
+  xlab("Mean dN/dS ratio") + ylab("Frequency")
+
+#ggsave("/Users/bguinet/Desktop/Cynipoidea_paper/dNdS_density_plot.pdf", width = 12, height = 7)
+
+```

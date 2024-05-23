@@ -1,0 +1,120 @@
+#Usage example on cluster 
+
+#nohup snakemake -j 8000  -s Snakemake_Alignment_main_Datation  --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  --exclude='pbil-deb33' -o {params.out} -e {params.err}  " &> nohup_Alignment_main_datation_snakemake.out &
+
+
+import re 
+from Bio import SeqIO 
+import os 
+#Define your paths :
+
+Cluster_seqs_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_final" #The path where all cluster seq not aligned will be present
+Cluster_alignment_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_alignment" #The path where all aligned cluster seq will be present
+Cluster_datation_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_phylogeny"  #The path where all cluster phylognies seq will be present
+
+mmseqs="/beegfs/data/bguinet/TOOLS/mmseqs/bin/mmseqs"
+
+
+#If more than 2 taxa : 
+def file_size(filePath):
+    with open(filePath, 'r') as myfile:
+	    data=myfile.read().replace('\n', ' ')
+	    nb=data.count(">")
+	    return nb
+
+#For alignment with more than 1 taxa
+SAMPLES=[]
+for file in os.listdir(Cluster_seqs_path):
+    taxa_list=[]
+    if file.endswith("_datation.aa"):
+      taxa_list=[]
+      for record in SeqIO.parse(Cluster_seqs_path+"/"+file, "fasta"):
+         taxa_list.append(re.sub(".*_","",record.id))
+      if len(list(dict.fromkeys(taxa_list)))>4:
+         Clustername=re.sub("_datation.aa","",file)
+         SAMPLES.append(Clustername)	
+
+print(SAMPLES)
+
+#For datation with more than 2 taxas 
+SAMPLES2=[]
+for file in os.listdir(Cluster_seqs_path):
+    if file.endswith("_datation.aa"):
+       if file_size(Cluster_seqs_path+"/"+file)>2:
+         Clustername=re.sub("_datation.aa","",file)
+         SAMPLES2.append(Clustername)	
+
+
+rule all:
+  input:
+        expand(Cluster_alignment_path+"/{cluster_number}_main_datation.aa.ali", cluster_number = SAMPLES),
+	      expand(Cluster_alignment_path+"/{cluster_number}_main_datation.aa.ali.trimmed", cluster_number = SAMPLES),
+	      Cluster_datation_path+"/Concatenated_sequences_main_datation.treefile"
+
+
+#Run Clustal analysis 
+rule Clustal_cluster_alignment:
+  log: Cluster_alignment_path+"/{cluster_number}.log"
+  params:
+     threads="3",
+     time="2:00:00",
+     name="Cluster_alignment_{cluster_number}",
+     out=Cluster_alignment_path+"/Clustal_run_{cluster_number}.out",
+     err=Cluster_alignment_path+"/Clustal_run_{cluster_number}.error"
+  input:
+     Cluster_file=Cluster_seqs_path+"/{cluster_number}_datation.aa"
+  output: 
+     Alignment_cluster_file=Cluster_alignment_path+"/{cluster_number}_main_datation.aa.ali",
+  shell:
+     """
+     hostname
+     cd {Cluster_seqs_path}
+     /beegfs/data/bguinet/TOOLS/clustalo -i {input.Cluster_file} -o {output.Alignment_cluster_file} --threads {params.threads}
+     """
+
+#Run trimal analysis 
+rule Trimal_cluster:
+  log: Cluster_alignment_path+"/{cluster_number}.log"
+  params:
+     threads="1",
+     time="10:00",
+     name="Cluster_alignment_{cluster_number}",
+     out=Cluster_alignment_path+"/Trimal_run_{cluster_number}.out",
+     err=Cluster_alignment_path+"/Trimal_run_{cluster_number}.error"
+  input:
+     Alignment_cluster_file=Cluster_alignment_path+"/{cluster_number}_main_datation.aa.ali"
+  output:
+     Alignment_cluster_file_trimmed=Cluster_alignment_path+"/{cluster_number}_main_datation.aa.ali.trimmed"
+  shell:
+     """
+     hostname
+     cd {Cluster_seqs_path}
+     /beegfs/data/bguinet/TOOLS/trimal/source/trimal -in {input.Alignment_cluster_file} -out {output.Alignment_cluster_file_trimmed} -automated1 -resoverlap 0.30 -seqoverlap 30 -fasta 
+     """
+
+#all dsDNA datation 
+rule dsDNA_datation:
+  params:
+     threads="20",
+     time="6:00:00",
+     name="dsDNA_datation",
+     out=Cluster_datation_path+"/Concatenated_sequences_main_datation.out",
+     err=Cluster_datation_path+"/Concatenated_sequences_main_datation.error"
+  output:
+     dsDNA_partition=Cluster_datation_path+"/partition_main_datation.txt",
+     dsDNA_partition2=Cluster_datation_path+"/partition_main_datation.tab",
+     Concatenated_sequence_alignment=Cluster_datation_path+"/Concatenated_sequences_main_datation.aln",
+     Treefile_output=Cluster_datation_path+"/Concatenated_sequences_main_datation.treefile"
+  shell:
+     """
+     hostname
+     cd {Cluster_datation_path}
+     #Concatenate cluster trimmed alignment 
+     perl /beegfs/home/bguinet/these_scripts_2/catfasta2phyml.pl -f --concatenate --verbose {Cluster_alignment_path}/*_main_datation.aa.ali.trimmed > {output.Concatenated_sequence_alignment}  2> {output.dsDNA_partition} || true
+     #Transform to partition.tab 
+     grep '_main_datation.aa.ali.trimmed =' {output.dsDNA_partition} >> {output.dsDNA_partition2} || true
+     sed -i "s@Cluster@AA, Cluster@g" {output.dsDNA_partition2}
+     cat {output.dsDNA_partition2}
+     #Inferring species tree with ultraboostap  and alrt 
+     /beegfs/data/bguinet/TOOLS/iqtree-2.1.2-Linux/bin/iqtree2 -s {output.Concatenated_sequence_alignment} -spp {output.dsDNA_partition2} --prefix Concatenated_sequences_main_datation -m MFP -m TESTONLY  -nt {params.threads}
+     """

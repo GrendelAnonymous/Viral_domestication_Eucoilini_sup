@@ -1,0 +1,132 @@
+import re 
+import os 
+import os.path
+import pandas as pd
+import numpy as np
+import sys
+import argparse
+import os
+import re
+
+
+#nohup snakemake -j 8000  -s Snakemake_dNdS_analysis_BUSCOs_part5   --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  -o {params.out}  " &> nohup_Snakemake_dNdS_analysis_BUSCOs_part5.out &&
+
+#Define your paths :
+BUSCO_seq_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/BUSCO_dNdS/BUSCO_files/" #The path where all busco nucleotide seq not aligned will be present
+BUSCO_alignment_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/BUSCO_dNdS/BUSCO_alignmnent/"
+BUSCO_tree="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/BUSCO_phylogeny/BUSCO_concatenated_phylogeny/Concatenated_BUSCO_sequences_for_dNdS.treefile"
+dNdS_BUSCO_analysis_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/BUSCO_dNdS/Paml_results/"
+
+
+if os.path.exists(BUSCO_seq_path+"Control_check1.txt"):
+ SAMPLES=[]
+ for file in os.listdir(BUSCO_seq_path):
+    if file.endswith(".fna"):
+      BUSCOname=re.sub(".fna","",file)
+      SAMPLES.append(BUSCOname)
+
+ SAMPLES2=[]
+ for file in os.listdir(BUSCO_alignment_path):
+    if file.endswith(".trimmed"):
+      BUSCOname=re.sub("_NT.fna.trimmed","",file)
+      SAMPLES2.append(BUSCOname)
+
+
+def dNdS_argument(BUSCO_Names):
+    busco_name=BUSCO_Names
+    busco_name=str(busco_name)
+    list_loci= 'Rhoptromeris Leptopilina_clavipes Leptopilina_boulardi_GCA_019393585.1 Leptopilina_heterotoma_GCA_015476425.1 Thrichoplasta Trybliographa' #list sp to test 
+    #list_loci= 'Leptopilina_clavipes Leptopilina_boulardi_GCA_019393585.1 Leptopilina_heterotoma_GCA_015476425.1 Rhoptromeris Thrichoplasta' #list sp to test
+    arg= "/beegfs/data/bguinet/Cynipoidea_project/dNdS_analyzer_busco.py -b "+str(busco_name)+" -l '"+str(list_loci)+"' -aln "+ BUSCO_alignment_path + str(busco_name)+"_NT.fna.trimmed -tree "+ BUSCO_tree +" -o "+dNdS_BUSCO_analysis_path +" --model ALL"
+    return(arg)
+
+def dNdS_busco_output(BUSCO_Names):
+    busco_name=BUSCO_Names
+    busco_name=str(busco_name)
+    return (dNdS_BUSCO_analysis_path+busco_name+".out")
+
+def dNdS_busco_error(BUSCO_Names):
+    busco_name=BUSCO_Names
+    busco_name=str(busco_name)
+    print('Error file redirected to : ',dNdS_BUSCO_analysis_path+busco_name+".error")
+    return (dNdS_BUSCO_analysis_path+busco_name+".error")
+
+
+rule all:
+  input:
+        BUSCO_seq_path+"Control_check1.txt",
+        #expand(BUSCO_alignment_path+"{BUSCO_number}_AA.fna", BUSCO_number = SAMPLES)
+        expand(dNdS_BUSCO_analysis_path+"{BUSCO_Names}", BUSCO_Names=SAMPLES2) 
+
+
+
+#Create the BUSCO fna files 
+
+rule Create_BUSCO_files:
+  params:
+     threads = "1",
+     time = "10:00",
+     name = "Create_BUSCO_files",
+     out = BUSCO_seq_path+"Create_BUSCO_files.out",
+     err = BUSCO_seq_path+"Create_BUSCO_files.error"
+  output:
+     Output_checkpoint=BUSCO_seq_path+"Control_check1.txt"
+  shell:
+     """
+     python3 /beegfs/data/bguinet/Cynipoidea_project/Create_BUSCO_files_for_dNdS.py -l Leptopilina_boulardi_GCA_019393585.1,Leptopilina_heterotoma_GCA_015476425.1,Leptopilina_clavipes,Rhoptromeris,Thrichoplasta,Trybliographa,Leptolamina \
+     -out_busco_dir /beegfs/data/bguinet/Cynipoidea_project/BUSCO_dNdS/ -main_dir /beegfs/data/bguinet/Cynipoidea_project/Genomes/  -n_missing 0  -n_max 1000
+     """
+        
+#Run MACSE codon alignment analysis 
+rule MACSE_BUSCO_alignment:
+  params:
+     threads = "1",
+     time = "6:00:00",
+     name = "Codon_alignment_{BUSCO_number}",
+     out = BUSCO_alignment_path+"MACSE_run_{BUSCO_number}.out",
+     err = BUSCO_alignment_path+"MACSE_run_{BUSCO_number}.error"
+  input:
+     BUSCO_file=BUSCO_seq_path+"{BUSCO_number}.fna"
+  output: 
+     Alignment_BUSCO_file_AA=BUSCO_alignment_path+"{BUSCO_number}_AA.fna",
+     Alignment_BUSCO_file_DNA=BUSCO_alignment_path+"{BUSCO_number}_NT.fna",
+     Alignment_BUSCO_file_DNA_trimmed=BUSCO_alignment_path+"{BUSCO_number}_NT.fna.trimmed"
+  shell:
+     """
+     hostname
+     #export JAVA_HOME=/usr/local/jre1.8.0_202/
+     #export PATH=/usr/local/jre1.8.0_202/bin:$PATH
+     cd {BUSCO_seq_path}
+     DEST=$(basename {input.BUSCO_file})
+     sed -i "s@\\*@@g" {input.BUSCO_file}
+     sed -i "s@(+):@_+__@g" {input.BUSCO_file}
+     sed -i "s@(-):@_-__@g" {input.BUSCO_file} 
+     sed -i "s@:@_@g" {input.BUSCO_file}
+     java -jar /beegfs/data/bguinet/TOOLS/macse_v2.05.jar -prog alignSequences -seq {input.BUSCO_file} 
+     DEST_NT=$(echo $DEST | sed 's/.fna/_NT.fna/')
+     DEST_AA=$(echo $DEST | sed 's/.fna/_AA.fna/')
+     mv {BUSCO_seq_path}$DEST_NT {BUSCO_alignment_path}
+     mv {BUSCO_seq_path}$DEST_AA {BUSCO_alignment_path}
+     #Trim codon alignmnent
+     sed -i 's@!@-@g' {output.Alignment_BUSCO_file_AA}
+     sed -i 's@!@-@g' {output.Alignment_BUSCO_file_DNA}
+     /beegfs/data/bguinet/TOOLS/trimal/source/readal -in {output.Alignment_BUSCO_file_DNA} -out {output.Alignment_BUSCO_file_DNA}.unaligned -onlyseqs
+     /beegfs/data/bguinet/TOOLS/trimal/source/trimal -backtrans {output.Alignment_BUSCO_file_DNA}.unaligned -in {output.Alignment_BUSCO_file_AA} -automated1 -resoverlap 0.30 -seqoverlap 30 -fasta -ignorestopcodon -out {output.Alignment_BUSCO_file_DNA_trimmed}
+     """
+
+rule dNdS_analysis:
+    params:
+     threads=1,
+     name=dNdS_busco_output,
+     err= dNdS_busco_error,
+     out= dNdS_busco_output,
+     dNdS_command= dNdS_argument
+    output:
+     outfile=dNdS_BUSCO_analysis_path+"{BUSCO_Names}"
+    shell:
+     """
+     hostname
+     echo {params.dNdS_command}
+     python3 -u {params.dNdS_command} || true
+     touch {output.outfile}
+     """

@@ -1,0 +1,97 @@
+from Bio import SeqIO 
+import pandas as pd
+import re
+import os
+
+
+# usage example 
+#nohup snakemake -j 8000  -s Snakemake_Clustering_hmmer_step2  --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  --exclude='pbil-deb33' -o {params.out} -e {params.err}  " &> nohup_Clustering_snakemake.out &
+#
+#Output clustering directory
+Output_cluster_dir="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/"
+Output_cluster_mmseqs="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_mmseqs"
+Output_cluster_ali="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_alignment"
+Output_cluster_hmm="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_hmmer"
+
+List_clusters=[]
+for filename in os.listdir(Output_cluster_mmseqs):
+    if filename.endswith(".aa"):
+      List_clusters.append(re.sub('.aa','',filename))
+
+
+rule all:
+        input:
+                expand(Output_cluster_ali+"/{cluster}_AA.ali", cluster = List_clusters),
+                expand(Output_cluster_hmm+"/{cluster}.hmm", cluster = List_clusters),
+                expand(Output_cluster_hmm+"/Hmmer_{cluster}.tab", cluster = List_clusters),
+		Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster.tab",
+		#Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs.tab"
+                
+
+
+#Before we need to align all sequences 
+
+
+#Run clustalo analysis 
+rule Clustal_cluster_alignment:
+  log: Output_cluster_ali+"/{cluster_number}.log"
+  params:
+     threads="2",
+     time="10:00",
+     name="Cluster_alignment_{cluster_number}",
+     out=Output_cluster_ali+"/Clustal_run_{cluster_number}.out",
+     err=Output_cluster_ali+"/Clustal_run_{cluster_number}.error"
+  input:
+     Cluster_file=Output_cluster_mmseqs+"/{cluster_number}.aa"
+  output:
+     Alignment_cluster_file=Output_cluster_ali+"/{cluster_number}_AA.ali",
+  shell:
+     """
+     hostname
+     cd {Output_cluster_mmseqs}
+     /beegfs/data/bguinet/TOOLS/clustalo -i {input.Cluster_file} -o {output.Alignment_cluster_file} --threads {params.threads}
+     #/beegfs/data/bguinet/TOOLS/mafft-7.505-with-extensions/bin/mafft-ginsi  --maxiterate 1000 --thread {params.threads} {input.Cluster_file} > {output.Alignment_cluster_file}
+     """
+
+rule HMMER_analysis:
+   params:
+      threads="2",
+      time="00:10:00",
+      name="Clustering_LbFV_family",
+      out= Output_cluster_dir+"Hmmer_Clustering_job.out",
+      err= Output_cluster_dir+"Hmmer_Clustering_job.error"
+   input:
+      Cluster_ali=Output_cluster_ali+"/{cluster}_AA.ali",
+      All_known_and_new_viral="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/ALL_Predicted_and_known_ORFs_new.fa"
+   output:
+      Hmmer_profile=Output_cluster_hmm+"/{cluster}.hmm",
+      Hmmer_tab=Output_cluster_hmm+"/Hmmer_{cluster}.tab"
+   shell:
+      """
+      /beegfs/data/bguinet/TOOLS/hmmer-3.3.2/src/hmmbuild {output.Hmmer_profile} {input.Cluster_ali}
+      /beegfs/data/bguinet/TOOLS/hmmer-3.3.2/src/hmmsearch --tblout {output.Hmmer_tab} --cpu {params.threads} {output.Hmmer_profile} {input.All_known_and_new_viral}
+      """
+
+rule HMMER_clustering:
+   params:
+      threads="2",
+      time="00:40:00",
+      name="Clustering_LbFV_family",
+      out= Output_cluster_dir+"Hmmer_Clustering_job.out",
+      err= Output_cluster_dir+"Hmmer_Clustering_job.error"
+   input:
+      Cluster_blast_file=Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-cluster.tab",
+      Hmmer_path=Output_cluster_hmm
+   output:
+      Hmmer_cluster_output=Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster.tab",
+      #ORF_tab_output=Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs.tab"
+   shell:
+      """
+      python3 Hmmer_clustering.py -p {input.Hmmer_path} -b {input.Cluster_blast_file}  -o {output.Hmmer_cluster_output}
+      """
+      #python3 Create_clusters.py -b {output.Hmmer_cluster_output} -o {output.ORF_tab_output}
+      #"""
+
+
+
+

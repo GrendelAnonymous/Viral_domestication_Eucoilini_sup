@@ -1,0 +1,165 @@
+from Bio import SeqIO 
+import pandas as pd 
+import re 
+import os
+
+#Example run in slurm
+
+#nohup snakemake -j 8000  -s Snakemake_Blast_Clustering2_step1  --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  --constraint='haswell|broadwell|skylake' -o {params.out} -e {params.err}  " &> nohup_Blast_Clustering_snakemake.out &
+#nohup snakemake -j 8000  -s Snakemake_Blast_Clustering2_step1  --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}   -o {params.out} -e {params.err}  " &> nohup_NR_snakemake.out &
+
+
+List_viruses =['Chelonus_insularis','Trybliographa','Rhoptromeris','Thrichoplasta','Leptopilina_clavipes','Leptopilina_boulardi_GCA_003121605','Leptopilina_heterotoma_GCA_010016045','Leptopilina_heterotoma_GCA_009602685',
+'Leptopilina_heterotoma_GCA_009026005','Leptopilina_heterotoma_GCA_009025955','Leptopilina_boulardi_GCA_015476485',
+'Leptopilina_boulardi_GCA_011634795','Leptolamina','Phanerotoma','Dolichomitus','Melanaphis_sacchari','Eurytoma_brunniventris','Leptopilina_heterotoma_GCA_015476425.1','Leptopilina_boulardi_GCA_019393585.1','Platygaster_equestris','Platygaster_orseoliae']
+#List_viruses=['Chelonus_insularis']
+
+#Genomes directory
+Genome_directory="/beegfs/data/bguinet/Cynipoidea_project/Genomes/"
+
+#Output clustering directory
+Output_cluster_dir="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/"
+Cluster_seqs_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_seqs" #The path where all cluster seq not aligned will be present
+NR_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/NR_analyse/"
+
+# Create directories 
+
+for sp in List_viruses:
+	if not os.path.exists(Genome_directory+"run_mmseqs2"):
+	    os.makedirs(Genome_directory+"run_mmseqs2")
+
+if not os.path.exists(Output_cluster_dir+"/All_blast_results/"):
+	os.makedirs(Output_cluster_dir+"/All_blast_results/")
+
+if not os.path.exists(Output_cluster_dir+"/All_seqs/"):
+        os.makedirs(Output_cluster_dir+"/All_seqs/")
+
+## Program used 
+mmseqs="/beegfs/data/bguinet/TOOLS/mmseqs/bin/mmseqs"
+
+
+#Snakemake part 
+
+rule all:
+	input:
+		#Output_cluster_dir+"ALL_Predicted_and_known_ORFs.fa",
+		expand(Genome_directory+"{sample}/assembly/{sample}_final_assembly_db",sample = List_viruses),
+		expand(Genome_directory+"{sample}/run_mmseqs2/Mmseqs_dsDNA_EVEs_results.m8",sample = List_viruses),
+		expand(Genome_directory+"{sample}/run_mmseqs2/Fasta_viral_loci.faa",sample = List_viruses),
+		expand(Output_cluster_dir+"All_seqs/Fasta_viral_loci_{sample}.faa",sample = List_viruses),
+		#NR_path+"NR_homology_result.m8",
+		#NR_path+"Blast_file_HSPs_NR.tab",
+		#Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-cluster.tab"
+
+rule Make_dsDNA_viruses_db:
+	params:
+		threads="1",
+		time="10:00",	
+		name="Make_dsDNA_viruses_db",
+		out=Output_cluster_dir+"Make_dsDNA_viruses_db_job.error",
+		err=Output_cluster_dir+"Make_dsDNA_viruses_db_job.out"
+	input:
+		Freeliving_dsDNA_loci = "/beegfs/data/bguinet/LbFV_family_project/Clustering/ALL_Predicted_and_known_ORFs_new.fa"
+	output:
+		Freeliving_dsDNA_viruses=Output_cluster_dir+"ALL_Predicted_and_known_ORFs_new.fa"
+	shell:
+		"""
+		cd {Output_cluster_dir}
+		# Add Known free-living viruses dsDNA sequences
+		cp {input.Freeliving_dsDNA_loci} {output.Freeliving_dsDNA_viruses}
+		{mmseqs} createdb {output.Freeliving_dsDNA_viruses}  Freeliving_dsDNA_viruses_new_db
+		"""
+	  
+rule Find_LbFV_like_EVEs:
+	params:
+		threads="30",
+		time="6:00:00",
+		name="{sample}_Mmseqs2_dsDNA_viruses",
+		out= Genome_directory+"{sample}/run_mmseqs2/Mmseqs2_dsDNA_viruses_job.out",
+		err= Genome_directory+"{sample}/run_mmseqs2/Mmseqs2_dsDNA_viruses_job.out"
+	input:
+		Genome_assembly_fasta=Genome_directory+"{sample}/assembly/{sample}_final_assembly.fna",
+		Freeliving_dsDNA_viruses_db = Output_cluster_dir+"ALL_Predicted_and_known_ORFs_new_db"
+	output:
+		Genome_assembly_db=Genome_directory+"{sample}/assembly/{sample}_final_assembly_db",
+		Blast_output=Genome_directory+"{sample}/run_mmseqs2/Mmseqs_dsDNA_EVEs_results.m8" 
+	shell:
+	        """
+		#mkdir -p {Genome_directory}/{wildcards.sample}/run_mmseqs2/
+		cd {Genome_directory}{wildcards.sample}/run_mmseqs2/
+		{mmseqs} createdb {input.Genome_assembly_fasta} {output.Genome_assembly_db}
+		#rm Mmseqs_dsDNA_EVEs_results*
+		#rm -r Mmseqs_dsDNA_EVEs_tpm
+		{mmseqs} search {output.Genome_assembly_db} {input.Freeliving_dsDNA_viruses_db}  Mmseqs_dsDNA_EVEs_results Mmseqs_dsDNA_EVEs_tpm -s 7.5 -e 0.001 --threads {params.threads} --remove-tmp-files
+		#Transform results 
+		{mmseqs} convertalis --format-output 'query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,tlen,qlen,qcov,tcov' {output.Genome_assembly_db} {input.Freeliving_dsDNA_viruses_db}  Mmseqs_dsDNA_EVEs_results Mmseqs_dsDNA_EVEs_results.m8 
+		#cp {output.Blast_output} {Output_cluster_dir}/All_blast_results/
+		"""
+
+rule Filter_and_extact_LbFV_like_EVEs:
+        input:
+                Blast_output=rules.Find_LbFV_like_EVEs.output.Blast_output,
+                Genome_assembly_fasta=Genome_directory+"{sample}/assembly/{sample}_final_assembly.fna"
+        output:
+                Blast_output_filtred = Genome_directory+"{sample}/run_mmseqs2/Mmseqs_dsDNA_EVEs_results_filtred.m8",
+                LbFV_like_EVEs_AA = Genome_directory+"{sample}/run_mmseqs2/Fasta_viral_loci.faa",
+                LbFV_like_EVEs_DNA = Genome_directory+"{sample}/run_mmseqs2/Fasta_viral_loci.fna",
+		Final_AA_output = Output_cluster_dir+"All_seqs/Fasta_viral_loci_{sample}.faa"
+        params:
+                threads="1",
+                time="10:00",
+                name="{sample}_Extract_homologs",
+                out= Genome_directory+"{sample}/run_mmseqs2/Extract_Mmseqs2_dsDNA_homolog_viruse_loci_job.out",
+                err= Genome_directory+"{sample}/run_mmseqs2/Extract_Mmseqs2_dsDNA_homolog_viruse_loci_job.error"
+        shell:
+                """
+                # Filter and extract loci  
+                python3  /beegfs/data/bguinet/Cynipoidea_project/Scripts/Filter_Extract_and_translated_blast_loci.py -g {input.Genome_assembly_fasta} -sp {wildcards.sample} -f {input.Blast_output} -of  {output.Blast_output_filtred} -oaa {output.LbFV_like_EVEs_AA} -odna {output.LbFV_like_EVEs_DNA} 
+                #
+                cp {output.LbFV_like_EVEs_AA} {output.Final_AA_output}
+                """
+
+
+rule NR_filtering_analysis:
+  params:
+     partition="bigmem",
+     mem="100G",
+     threads="20",
+     time="24:00:00",
+     name="NR_Cluster_alignment",
+     out=Cluster_seqs_path+"/NR_run.out",
+     err=Cluster_seqs_path+"/NR_run.error"
+  output:
+     All_Cluster_file=NR_path+"/Fasta_viral_loci_ALL.faa",
+     NR_results=NR_path+"NR_homology_result.m8",
+     Blast_NR_filtred=NR_path+"Blast_file_HSPs_NR.tab"
+  shell:
+     """
+     hostname
+     cd {Output_cluster_dir}"All_seqs/"
+     #Gather all sequence from cluster into one unique file
+     rm -rf {output.All_Cluster_file} | true
+     cat *.faa >> {NR_path}{output.All_Cluster_file}
+     cd {NR_path}
+     {mmseqs} createdb {output.All_Cluster_file} All_clusters_AA_db
+     {mmseqs} search All_clusters_AA_db /beegfs/data/bguinet/these/NR_db NR_homology_result NR_homology_tpm -e 0.001 
+     {mmseqs} convertalis --format-output 'query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,tlen,qcov,tcov,taxid,taxname,taxlineage' All_clusters_AA_db /beegfs/data/bguinet/these/NR_db NR_homology_result {output.NR_results}
+     python3 /beegfs/data/bguinet/Cynipoidea_project/Scripts/Filter_NR_results.py -Nr {output.NR_results} -o {output.Blast_NR_filtred}
+     """
+
+# First clustering (the second is in the Snakemake_Blast_Clustering_step2 file)
+rule Mmseqs_clustering:
+        input:
+                Blast_output = NR_path+"Blast_file_HSPs_NR.tab"
+        output:
+                Cluster_output = Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-cluster.tab"
+        params:
+                threads="1",
+                time="20:00",
+                name="Mmseqs_clustering",
+                out= Output_cluster_dir+"Mmseqs_clustering_job.out",
+                err= Output_cluster_dir+"Mmseqs_clustering_job.error"
+        shell: 
+                """
+                python3 /beegfs/data/bguinet/Cynipoidea_project/Scripts/Mmseqs_clustering.py -b {input.Blast_output} -o {output.Cluster_output}
+                """

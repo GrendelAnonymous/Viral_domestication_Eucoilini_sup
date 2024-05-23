@@ -1,0 +1,180 @@
+#Usage example on cluster 
+
+#nohup snakemake -j 8000  -s Snakemake_dNdS_analysis_EVES_part5   --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  --exclude='pbil-deb33' -o {params.out} -e {params.err}  " &> nohup_Snakemake_dNdS_analysis_part5 &
+
+#shell.executable("/bin/bash")
+#shell.prefix("source ~/.bashrc; ")
+import os.path
+import pandas as pd
+import numpy as np
+import sys
+import argparse
+import os
+import re
+
+
+#Your paths 
+Phylogeny_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_phylogeny/"
+Alignment_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_alignment/"
+Cluster_table="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs_Cov_Metaeuk_TE_Score_Event.tab"
+dNdS_analysis_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/dNdS_analysis/"
+
+tab = pd.read_csv(Cluster_table,sep=";")
+tab=tab.loc[~tab['Cluster_hmmer'].isna()]
+tab=tab.loc[~tab['Nsp'].isna()]
+#tab=tab.loc[tab['Cluster_hmmer'].eq("Cluster222")]
+#tab=tab.drop(["Unnamed: 0"],axis=1)
+
+tab = tab[pd.notnull(tab['Cluster_hmmer'])]
+tab= tab[tab['Event'].notna()]
+
+# not run already ran analysis 
+list_ran_analysis=[]
+for file in os.listdir(dNdS_analysis_path):
+   if file.endswith(".out"):
+    file=re.sub( ".out","",file)
+    file=re.sub( "dNds_","",file)
+    list_ran_analysis.append(file)
+
+tab["Cluster_hmmer_and_event"] = tab['Cluster_hmmer'] + '_' + tab['Event'].astype(int).astype(str)
+
+tab=tab.loc[~(tab['Cluster_hmmer_and_event'].isin(list_ran_analysis))]
+#remove log file that did not run correctly 
+import glob,os
+files = glob.glob('/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/dNdS_analysis/Logs/*')
+for f in files:
+    os.remove(f)
+
+
+#manually stuff 
+#tab = tab.loc[tab['Cluster_hmmer'].str.contains("Cluster128")]
+
+print(tab)
+#If we want to be interested only on Events without dNdS results  - post dN/dS analysis 
+
+#print("tab",tab)
+list_of_cluster=[]
+for index, row in tab.iterrows():
+  list_of_cluster.append(row["Cluster_hmmer"])
+list_of_cluster=list(dict.fromkeys(list_of_cluster))
+list_of_cluster = [x for x in list_of_cluster if str(x) != 'nan']
+
+subtab=tab.drop_duplicates(['Cluster_hmmer','Event'],keep= 'first')
+subtab=subtab.loc[subtab['Nloc'].gt(1) & subtab['Scaffold_score'].isin(["A","B","C","D","E"])]
+subtab=subtab.drop_duplicates(['Cluster_hmmer','Event','Names3'],keep= 'first')
+
+#subtab
+print(len(subtab))
+subtab['Event']=subtab['Event'].apply(np.int64)
+#Do not choose analysis already ran 
+import os
+print(len(subtab))
+#Remove cluster where there are more than 10 events 
+subtab['Names3']=subtab['Names3'].str.replace(":|\(|\)", '_')
+tab['Names3']=tab['Names3'].str.replace(":|\(|\)", '_')
+subtab=subtab.loc[~subtab['Cluster_hmmer'].str.contains("Cluster29_redefined")]
+#subtab=subtab.loc[subtab['Cluster_hmmer'].str.contains("Cluster59")]
+
+# Puryfying selection analysis 
+
+def isNaN(string):
+  return string != string
+def dNdS_argument(representative_Names3):
+    Names3=representative_Names3
+    Names3=str(Names3)
+    cluster=tab[tab['Names3']==Names3].iloc[0]['Cluster_hmmer']
+    print(cluster)
+    tab2=tab.loc[tab['Cluster_hmmer']==cluster]
+    tab2=tab2.loc[tab2['Names3']==Names3]
+    tab2=tab2.drop_duplicates(['Cluster_hmmer','Event'],keep= 'first')
+    tab2=tab2[(tab2['Nsp'] > 1) | (tab2['Nloc'] >1)]
+    print(tab2)
+    nb_leaf=len(tab2['target'].unique())+len(tab2['Names3'].unique())
+    if nb_leaf < 50000:
+      #Keep only one represent for the events 
+      tab2=tab2.drop_duplicates(subset='Event', keep="first")
+      for index, row in tab2.iterrows():
+        if isNaN(row['Prot_name']):
+          clustername = row['Cluster_hmmer']
+        else:
+          clustername=row['Prot_name']
+          clustername= re.sub(" ","-",clustername)
+          clustername = re.sub("\\(","",clustername)
+          clustername = re.sub("\\)","",clustername)
+          clustername = row['Cluster_hmmer'] +"_"+ clustername
+        list_loci=row['Tips4dNdS.array']
+        list_loci=re.sub("\[","",list_loci)
+        list_loci=re.sub("\]","",list_loci)
+        list_loci=re.sub("\'","",list_loci)
+        list_loci=str(list_loci).strip('[]')
+        list_loci=re.sub(",","",list_loci)
+        list_loci=re.sub("'","",list_loci)
+        event_number=str(int(row['Event']))
+        cluster=re.sub("_NT.dna.treefile","",cluster)
+        if 'LbFVorf' in clustername:
+          clustername = re.sub("LbFV","dNdS_LbFV",clustername)
+          arg= "/beegfs/data/bguinet/Cynipoidea_project/dNdS_analyzer.py -enb "+event_number+" -c "+str(cluster)+" -l '"+str(list_loci)+"' -aln "+ Alignment_path + str(clustername)+"_NT.dna.trimmed -tree "+ Phylogeny_path +str(clustername)+"_AA.dna.treefile -o "+dNdS_analysis_path +" --model ALL"
+        else:
+          arg= "/beegfs/data/bguinet/Cynipoidea_project/dNdS_analyzer.py -enb "+event_number+" -c "+str(cluster)+" -l '"+str(list_loci)+"' -aln "+ Alignment_path + str(clustername)+"_dNdS_NT.dna.trimmed -tree "+ Phylogeny_path +str(clustername)+"_dNdS_AA.dna.treefile -o "+dNdS_analysis_path +" --model ALL"
+        return(arg)
+
+def dNdS_cluster_output(representative_Names3):
+    Names3=representative_Names3
+    Names3=str(Names3)
+    tab['Names3']=tab['Names3'].str.replace(":|\(|\)", '_')
+    tab['Names3']=tab['Names3'].str.replace(' \\[ORF\\]','')
+    cluster=tab[tab['Names3']==Names3].iloc[0]['Cluster_hmmer']
+    Event=tab[tab['Names3']==Names3].iloc[0]['Event']
+    return (dNdS_analysis_path+cluster+"_"+str(Event)+".out")
+
+def dNdS_cluster_error(representative_Names3):
+    Names3=representative_Names3
+    Names3=str(Names3)
+    tab['Names3']=tab['Names3'].str.replace(":|\(|\)", '_')
+    tab['Names3']=tab['Names3'].str.replace(' \\[ORF\\]','')
+    cluster=tab[tab['Names3']==Names3].iloc[0]['Cluster_hmmer']
+    Event=tab[tab['Names3']==Names3].iloc[0]['Event']
+    print('Error file redirected to : ',dNdS_analysis_path+cluster+"_"+str(Event)+".error")
+    return (dNdS_analysis_path+cluster+"_"+str(Event)+".error")
+
+#########
+
+rule all:
+    input: 
+       #expand("/beegfs/data/bguinet/Cynipoidea_project/dNdS_analysis/Logs_positive/{representative_Names3_positive}", representative_Names3_positive=list(subtab_positive['Names3']))
+       expand("/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/dNdS_analysis/Logs/{representative_Names}", representative_Names=list(subtab['Names3'].str.replace(' \\[ORF\\]','')))
+       
+#/beegfs/home/bguinet/these_scripts_2/test/{representative_Names3}
+#https://stackoverflow.com/questions/46714560/snakemake-how-do-i-use-a-function-that-takes-in-a-wildcard-and-returns-a-value
+#    read_groups=lambda wildcards: identify_read_groups('cram/{sample}.bam.cram'.format(sample=wildcards.sample))
+
+
+
+rule dNdS_analysis:
+    params:
+     threads=1,
+     name=dNdS_cluster_output,
+     err= dNdS_cluster_error,
+     out= dNdS_cluster_output,
+     dNdS_command= dNdS_argument
+    output:
+     outfile="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/dNdS_analysis/Logs/{representative_Names}"
+    shell:
+     """
+     hostname
+     echo {params.dNdS_command}
+     python3 -u {params.dNdS_command} || true
+     touch {output.outfile}
+     """
+
+
+rule Add_dNdS_results:
+    input:
+     Cluster_tab={Cluster_table},
+     FEL_tab="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/dNdS_analysis/FEL_analyse.tab"
+    output:
+     output_tab="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs_Cov_Metaeuk_TE_Score_Event_dNdS.tab"
+    shell:
+     """ 
+     python3 Add_dNdS_informations.py -c {input.Cluster_tab} -fel {input.FEL_tab} -o {output.output_tab}
+     """

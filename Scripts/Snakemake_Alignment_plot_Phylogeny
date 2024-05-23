@@ -1,0 +1,93 @@
+#Usage example on cluster 
+
+#nohup snakemake -j 8000  -s Snakemake_Alignment_plot_Phylogeny   --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  --exclude='pbil-deb33' -o {params.out}  " &> nohup_Snakemake_Alignment_plot_Phylogenyx.out &
+
+
+import re 
+import os 
+from Bio import SeqIO
+#Define your paths :
+Cluster_seq_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_final/" #The path where all cluster seq not aligned will be present
+Cluster_alignment_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_alignment/" #The path where all aligned cluster seq will be present
+Cluster_phylogeny_path="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_phylogeny/"  #The path where all cluster phylognies seq will be present
+
+
+#For alignment with more than Nb_taxa_in_phylo taxa
+SAMPLES=[]
+for file in os.listdir(Cluster_seq_path):
+    if "_plot.aa" in file:
+      if os.path.exists(Cluster_phylogeny_path+re.sub("_plot.aa","",file)+"_plot.aa.ali.treefile") :
+       continue
+      else:
+       Clustername=re.sub("_plot.aa","",file)
+       SAMPLES.append(Clustername)
+
+
+#Remove dup 
+"""
+def to_dict_remove_dups(sequences):
+    return {record.id: record for record in sequences}
+
+for cluster in SAMPLES:
+ record_dict = to_dict_remove_dups(SeqIO.parse(Cluster_seq_path+cluster+"_plot.aa", "fasta"))
+ with open(Cluster_seq_path+cluster+"_plot.aa","w") as output:
+  SeqIO.write(record_dict.values(), output, 'fasta')
+
+for cluster in SAMPLES:
+ record_dict = to_dict_remove_dups(SeqIO.parse(Cluster_alignment_path+cluster+"_plot.aa.ali", "fasta"))
+ with open(Cluster_alignment_path+cluster+"_plot.aa.ali","w") as output:
+   SeqIO.write(record_dict.values(), output, 'fasta')
+"""
+print(len(SAMPLES))
+SAMPLES=['Cluster279']
+
+SAMPLES=['Cluster114_redefined']
+#SAMPLES=['Cluster559-Cluster482-Cluster457-Cluster353-Cluster2746-Cluster2234-Cluster1338-Cluster1713-Cluster1176-Cluster1383-Cluster2222-Cluster2543-Cluster735-Cluster167']
+#SAMPLES=['Cluster1677-Cluster463-Cluster352-Cluster1676-Cluster648_LbFVorf108']      
+rule all:
+  input:
+        expand(Cluster_alignment_path+"{cluster_number}_plot.aa.ali", cluster_number = SAMPLES),
+        expand(Cluster_phylogeny_path+"{cluster_number}_plot.aa.ali.treefile", cluster_number = SAMPLES)
+
+
+
+#Run Clustal analysis 
+rule Clustal_cluster_alignment:
+  params:
+     threads="3",
+     time="2:00:00",
+     name="Cluster_alignment_{cluster_number}",
+     out=Cluster_alignment_path+"/Clustal_run_plot_{cluster_number}.out",
+     err=Cluster_alignment_path+"/Clustal_run_plot_{cluster_number}.error"
+  input:
+     Cluster_file=Cluster_seq_path+"{cluster_number}_plot.aa"
+  output:
+     Alignment_cluster_file=Cluster_alignment_path+"{cluster_number}_plot.aa.ali"
+  shell:
+     """
+     hostname
+     cd {Cluster_seq_path}
+     /beegfs/data/bguinet/TOOLS/clustalo -i {input.Cluster_file} -o {output.Alignment_cluster_file} --threads {params.threads}
+     sed -i 's@ @-@g' {output.Alignment_cluster_file}
+     """
+
+#Run IQTREE analysis 
+rule Cluster_phylogeny:
+  params:
+    threads = "30",
+    time = "5:00:00",
+    name = "Cluster_phylogeny_plot_{cluster_number}",
+    out = Cluster_phylogeny_path+"IQTREE_run_plot_{cluster_number}.out",
+    err = Cluster_phylogeny_path+"IQTREE_run_plot_{cluster_number}.error"
+  input:
+    Cluster_alignment_file=Cluster_alignment_path+"{cluster_number}_plot.aa.ali"
+  output:
+    Cluster_alignment_output=Cluster_phylogeny_path+"{cluster_number}_plot.aa.ali.treefile"
+  shell:
+    """
+    sed -i 's@!@-@g' {input.Cluster_alignment_file}
+    /beegfs/data/bguinet/TOOLS/iqtree-2.1.2-Linux/bin/iqtree2 -s {input.Cluster_alignment_file} -m MFP -alrt 5000 -bb 5000  -nt {params.threads} -redo
+    sed -i 's@____@_+__@g' {Cluster_alignment_path}{wildcards.cluster_number}_plot.aa.ali.treefile
+    mv {Cluster_alignment_path}{wildcards.cluster_number}_plot.aa.ali.* {Cluster_phylogeny_path}
+    """
+# mv /beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Cluster_alignment/_plot.aa.ali.* 

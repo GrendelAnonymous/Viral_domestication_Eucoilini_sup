@@ -1,0 +1,58 @@
+from Bio import SeqIO 
+import pandas as pd
+import re
+import os
+
+
+# usage example 
+#nohup snakemake -j 8000  -s Snakemake_add_informations_step3  --cluster "sbatch -J {params.name} -p normal -N 1 --cpus-per-task  {params.threads}  --exclude='pbil-deb33' -o {params.out} -e {params.err}  " &> nohup_Clustering_snakemake.out &
+#
+#Output clustering directory
+Output_cluster_dir="/beegfs/data/bguinet/Cynipoidea_project/Clustering/Analyses/"
+Output_metaeuk_repeat="/beegfs/data/bguinet/Cynipoidea_project/Analyses/Clustering/Metaeuk_TE_analysis/"
+
+
+mmseqs="/beegfs/data/bguinet/TOOLS/mmseqs/bin/mmseqs"
+metaeuk="/beegfs/data/bguinet/TOOLS/metaeuk/build/bin/metaeuk"
+
+
+rule all:
+        input:
+                Output_metaeuk_repeat+"Metaeuk_preds_results.fas",
+                Output_metaeuk_repeat+"All_candidate_scaffold_run_repeat_result.m8",
+		Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs_Cov.tab",
+		Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs_Cov_Metaeuk_TE_Score.tab"
+               
+rule Add_metaeuk_repeat_and_syntenie_informations:
+  params:
+    threads="15",
+    time="12:00:00",
+    name="Add_metaeuk_repeat_informations",
+    out=Output_metaeuk_repeat+"Add_metaeuk_repeat_informations.out",
+    err=Output_metaeuk_repeat+"Add_metaeuk_repeat_informations.error"
+  input:
+    Scaffolds_with_EVEs=Output_cluster_dir+All_candidate_scaffolds.dna",
+    Blast_tab=Output_cluster_dir"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs.tab"
+  output:
+    metaeuk_proteins_db=Output_metaeuk_repeat+"All_candidate_scaffold_db_metaeuk",
+    metaeuk_fasta_prediction=Output_metaeuk_repeat+"Metaeuk_preds_results.fas",
+    mmseqs_proteins_db=Output_metaeuk_repeat+"All_candidate_scaffold_db_mmseqs",
+    Repeat_results=Output_metaeuk_repeat+"All_candidate_scaffold_run_repeat_result.m8",
+    out1=Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs_Cov.tab",
+    out2=Output_cluster_dir+"Blast_file_HSPs_NR_Mmseqs-Hmmer_cluster_ORFs_Cov_Metaeuk_TE_Score.tab"
+  shell:
+    """
+    # Run the metaeuk analysis
+    cd {Output_metaeuk_repeat}
+    {metaeuk} createdb {input.Scaffolds_with_EVEs} {output.metaeuk_proteins_db}
+    {metaeuk} easy-predict {output.metaeuk_proteins_db} /beegfs/data/bguinet/TOOLS/UniProtKB Metaeuk_preds_results Metaeuk_preds_tmp --threads {params.threads}
+    {metaeuk} taxtocontig {output.metaeuk_proteins_db}  {output.metaeuk_fasta_prediction} Metaeuk_preds_results.headersMap.tsv /beegfs/data/bguinet/TOOLS/UniProtKB Taxa_Metaeuk_preds_results Taxa_Metaeuk_preds_tmp --majority 0.5 --tax-lineage 1 --lca-mode 2 --threads {params.threads}
+
+    # Run the BlastX repeat analysis 
+    {mmseqs} createdb {input.Scaffolds_with_EVEs} {output.mmseqs_proteins_db}
+    {mmseqs} search {output.mmseqs_proteins_db} /beegfs/data/bguinet/these/Repeat_env_analysis2/RepeatPeps_db {Output_metaeuk_repeat}All_candidate_scaffold_run_repeat_result {Output_metaeuk_repeat}All_candidate_scaffold_run_repeat_tpm  -s 7.5 --threads {params.threads}  --remove-tmp-files
+    {mmseqs} convertalis --format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qlen,tlen,tcov" {output.mmseqs_proteins_db} /beegfs/data/bguinet/these/Repeat_env_analysis2/RepeatPeps_db {Output_metaeuk_repeat}All_candidate_scaffold_run_repeat_result {output.Repeat_results} --threads {params.threads} 
+    Add_cov_metaeuk_TE_score.py  -b {input.Blast_tab} -out1 {output.out1} -out2 {output.out2} -mk1 {Output_metaeuk_repeat}Taxa_Metaeuk_preds_results_tax_per_pred.tsv  -mk2 {Output_metaeuk_repeat}Taxa_Metaeuk_preds_results_tax_per_contig.tsv -r {output.Repeat_results}
+    """
+
+
